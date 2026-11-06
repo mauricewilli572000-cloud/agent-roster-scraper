@@ -155,7 +155,7 @@ def benchmark(raw: dict, comps: dict):
 
 def _get(session, params: dict, key: str, budget: Counter) -> list:
     for attempt in range(4):
-        if budget["requests"] >= config.RENTCAST_MAX_REQUESTS:
+        if budget["requests"] >= (budget.get("cap") or config.RENTCAST_MAX_REQUESTS):
             raise RentCastError("request budget for this run reached")
         budget["requests"] += 1
         resp = session.get(API_URL, params=params, timeout=60, headers={
@@ -179,14 +179,16 @@ def listing_county(raw: dict) -> str:
     return c or parse_licenses.county_from_zip(_clean(raw.get("zipCode")))
 
 
-def fetch_county(session, key: str, county: str, status: str, budget: Counter) -> list[dict]:
+def fetch_county(session, key: str, county: str, query: dict, budget: Counter) -> list[dict]:
+    """One narrow query for one county (Active listings only), following pages up to the page cap."""
     area = config.RENTCAST_AREAS[county]
+    filters = {k: v for k, v in query.items() if k != "name"}
     out: list[dict] = []
-    for page in range(config.RENTCAST_MAX_PAGES[status]):
-        params = {**area, "status": status, "limit": config.RENTCAST_PAGE_SIZE,
-                  "offset": page * config.RENTCAST_PAGE_SIZE}
+    for page in range(config.RENTCAST_MAX_PAGES):
+        params = {**area, **config.RENTCAST_COMMON_FILTERS, **filters, "status": "Active",
+                  "limit": config.RENTCAST_PAGE_SIZE, "offset": page * config.RENTCAST_PAGE_SIZE}
         batch = _get(session, params, key, budget)
-        budget[f"fetched_{status.lower()}"] += len(batch)
+        budget[f"fetched_{query.get('name', 'all')}"] += len(batch)
         out.extend(r for r in batch if listing_county(r) == county)
         if len(batch) < config.RENTCAST_PAGE_SIZE:
             break
@@ -194,12 +196,41 @@ def fetch_county(session, key: str, county: str, status: str, budget: Counter) -
 
 
 def fetch_all(session, key: str, budget: Counter) -> list[dict]:
-    """Active listings only; sold and withdrawn listings are not needed."""
-    raws: list[dict] = []
-    for county in config.TARGET_COUNTIES:
-        if county in config.RENTCAST_AREAS:
-            raws.extend(fetch_county(session, key, county, "Active", budget))
-    return raws
+    """Every query for every county. If the call budget runs out partway, keep what was fetched
+    (the calls were already spent) and note it; a rejected API key still raises."""
+    raws: dict[str, dict] = {}
+    try:
+        for query in config.RENTCAST_QUERIES:
+            for county in config.TARGET_COUNTIES:
+                if county not in config.RENTCAST_AREAS:
+                    continue
+                for r in fetch_county(session, key, county, query, budget):
+                    raws.setdefault(str(r.get("id") or r.get("formattedAddress") or id(r)), r)
+    except AuthError:
+        raise
+    except RentCastError as e:
+        budget["partial"] = 1
+        budget["partial_reason"] = str(e)
+    return list(raws.values())
+
+
+def month_used(today: str, path: Path | None = None) -> int:
+    try:
+        return int(json.loads(Path(path or config.RENTCAST_USAGE_FILE).read_text()).get(today[:7], 0))
+    except (FileNotFoundError, ValueError, json.JSONDecodeError):
+        return 0
+
+
+def record_usage(today: str, calls: int, path: Path | None = None):
+    path = Path(path or config.RENTCAST_USAGE_FILE)
+    try:
+        usage = json.loads(path.read_text())
+    except (FileNotFoundError, ValueError, json.JSONDecodeError):
+        usage = {}
+    usage[today[:7]] = int(usage.get(today[:7], 0)) + calls
+    usage = dict(sorted(usage.items())[-12:])
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(usage, indent=1), encoding="utf-8")
 
 
 # --- normalise + history ----------------------------------------------------
@@ -415,8 +446,8 @@ def apply_to_records(records: list[dict], agents: dict[str, dict], stats: Counte
 
 # --- entry point ------------------------------------------------------------
 
-def run(records: list[dict], today: str, session=None,
-        history_path: Path | None = None, lead_path: Path | None = None) -> tuple[list[dict], Counter]:
+def run(records: list[dict], today: str, session=None, history_path: Path | None = None,
+        lead_path: Path | None = None, usage_path: Path | None = None) -> tuple[list[dict], Counter]:
     stats: Counter = Counter()
     history = load_history(history_path)
     key = os.environ.get("RENTCAST_API_KEY", "").strip()
@@ -425,8 +456,15 @@ def run(records: list[dict], today: str, session=None,
         if session is None:
             import requests
             session = requests.Session()
+        used = month_used(today, usage_path)
+        remaining = config.RENTCAST_MONTHLY_LIMIT - used
+        stats["month_calls_before"] = used
         budget: Counter = Counter()
+        budget["cap"] = min(config.RENTCAST_MAX_REQUESTS, max(remaining, 0))
         try:
+            if budget["cap"] <= 0:
+                raise RentCastError(f"monthly limit reached ({used} of {config.RENTCAST_MONTHLY_LIMIT} calls used); "
+                                    "skipping RentCast this run")
             raws = fetch_all(session, key, budget)
             comps = build_comps(raws)
             stats["comp_groups"] = len(comps)
@@ -439,7 +477,11 @@ def run(records: list[dict], today: str, session=None,
             stats["error"] = str(e)
         except Exception as e:  # noqa: BLE001 - network/JSON problems must not kill the roster run
             stats["error"] = f"{type(e).__name__}: {e}"
-        stats.update({k: v for k, v in budget.items()})
+        if budget["requests"]:
+            record_usage(today, budget["requests"], usage_path)
+        stats.update({k: v for k, v in budget.items() if k not in ("cap", "partial_reason")})
+        if budget.get("partial"):
+            stats["warning"] = f"partial fetch: {budget['partial_reason']}"
     else:
         stats["skipped_no_api_key"] = 1
 

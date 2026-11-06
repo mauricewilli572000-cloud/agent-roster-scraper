@@ -37,7 +37,9 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add docs/data exports
-          if [ -f data/listings_history.json ]; then git add data/listings_history.json; fi
+          for f in data/listings_history.json data/rentcast_usage.json; do
+            if [ -f "$f" ]; then git add "$f"; fi
+          done
           if git diff --cached --quiet; then
             echo "No changes"
           else

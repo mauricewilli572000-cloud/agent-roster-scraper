@@ -28,9 +28,15 @@ Local run: `RENTCAST_API_KEY=... python run_pipeline.py` (`--inspect` shows the 
 `--skip-listings` skips the API).
 
 ## Notes
-- Each weekly run pages through ACTIVE listings only (500 per call, several calls per county, roughly 25-30
-  calls in total; sold and withdrawn listings are not fetched). `RENTCAST_MAX_REQUESTS` in `config.py` caps calls per run.
-  The run log's `requests` and `fetched_active` show the real numbers.
+- **Free-plan mode (RentCast free = 50 calls/month, overage fees, no hard stop).** Each weekly run makes two narrow
+  queries per county instead of downloading everything: listings from the last 10 days (new distressed listings
+  and the comps for "under market") and listings older than 120 days. That is about 8 calls a run, roughly 35 a
+  month. Filters in `config.py` (`RENTCAST_COMMON_FILTERS`): single/multi-family homes at or under $250k.
+  `RENTCAST_MONTHLY_LIMIT` (45) stops the pipeline from calling RentCast once the month's count in
+  `data/rentcast_usage.json` reaches it; `RENTCAST_MAX_REQUESTS` (14) caps a single run.
+- Listings that were already 11-120 days old when you start are only picked up if they turn stale or are
+  caught by a later run, so coverage builds over the first weeks. Runs from your own machine are not counted in
+  the usage file unless you commit it; the monthly figure is for the GitHub workflow.
 - Listings accumulate in `data/listings_history.json`; scores get better as history builds. If the repo is
   public, that file and `docs/data` are public too.
 - Agents who appear on listings but are not in the license file are added with "license not checked" once

@@ -97,8 +97,25 @@ RENTCAST_AREAS = {
     "Hamilton":  {"latitude": 39.20, "longitude": -84.54, "radius": 20},
 }
 RENTCAST_PAGE_SIZE = 500                      # API maximum
-RENTCAST_MAX_PAGES = {"Active": 8}            # per county; only active listings are fetched
-RENTCAST_MAX_REQUESTS = 60                    # hard cap on API calls per run
+RENTCAST_MAX_PAGES = 2                        # pages per county per query (500 listings each)
+
+# Free-plan mode: instead of downloading every active listing, run two narrow queries per county.
+#   fresh = listed in the last ~10 days (a weekly run sees every new listing once, and these give
+#           the new-distressed signal plus the comps for "under market")
+#   stale = listed more than 120 days ago (the long-sitting signal, nothing else needed)
+# That is about 1 call per query per county, 8 calls per run. Filters use RentCast range syntax
+# ("min:max", "*" for open-ended, "|" between multiple values).
+RENTCAST_QUERIES = [
+    {"name": "fresh", "daysOld": "*:10"},
+    {"name": "stale", "daysOld": "121:*"},
+]
+RENTCAST_COMMON_FILTERS = {                   # applied to every query; set to {} to remove all
+    "propertyType": "Single Family|Multi-Family",
+    "price": "*:250000",                      # wholesale targets; raise it to widen coverage
+}
+RENTCAST_MAX_REQUESTS = 14                    # hard cap on API calls per run (8 expected)
+RENTCAST_MONTHLY_LIMIT = 45                   # free plan is 50/month, with overage fees and NO hard stop
+RENTCAST_USAGE_FILE = DATA_DIR / "rentcast_usage.json"   # calls used per calendar month, committed by the workflow
 RENTCAST_DELAY_SECONDS = 0.15                 # API limit is 20 req/s; stay far below
 
 SCORE_WINDOW_DAYS = 365                       # listings older than this stop counting

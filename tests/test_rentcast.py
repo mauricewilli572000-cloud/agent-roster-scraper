@@ -46,7 +46,7 @@ class FakeResp:
 
 
 class FakeSession:
-    """Serves pages out of per-(lat, status) lists and records every call."""
+    """Serves pages out of per-(lat, daysOld) lists and records every call."""
 
     def __init__(self, pages=None, status=200):
         self.pages, self.calls, self.status = pages or {}, [], status
@@ -55,7 +55,7 @@ class FakeSession:
         self.calls.append((params, headers))
         if self.status != 200:
             return FakeResp({}, self.status)
-        data = self.pages.get((params["latitude"], params["status"]), [])
+        data = self.pages.get((params["latitude"], params.get("daysOld")), [])
         off = params["offset"]
         return FakeResp(data[off: off + params["limit"]])
 
@@ -90,27 +90,47 @@ class Fetch(unittest.TestCase):
         self.sleep = mock.patch("time.sleep").start()
         self.addCleanup(mock.patch.stopall)
 
+    FRESH = {"name": "fresh", "daysOld": "*:10"}
+
     def test_paginates_and_filters_by_county(self):
         lat = config.RENTCAST_AREAS["Franklin"]["latitude"]
         page = ([raw(f"F{i}", "Ann Alder") for i in range(500)])          # full page -> fetch another
         page2 = [raw("X1", "Ann Alder", county="Delaware"), raw("F500", "Ann Alder")]
-        s = FakeSession({(lat, "Active"): page + page2})
+        s = FakeSession({(lat, "*:10"): page + page2})
         budget = Counter()
-        got = rc.fetch_county(s, "KEY", "Franklin", "Active", budget)
+        got = rc.fetch_county(s, "KEY", "Franklin", self.FRESH, budget)
         self.assertEqual(len(got), 501)                     # Delaware listing dropped
         self.assertEqual(budget["requests"], 2)
         self.assertEqual(s.calls[0][1]["X-Api-Key"], "KEY")
         self.assertEqual(s.calls[1][0]["offset"], 500)
+
+    def test_query_carries_filters(self):
+        s = FakeSession()
+        rc.fetch_county(s, "KEY", "Summit", {"name": "stale", "daysOld": "121:*"}, Counter())
+        p = s.calls[0][0]
+        self.assertEqual((p["daysOld"], p["status"]), ("121:*", "Active"))
+        self.assertEqual(p["price"], "*:250000")
+        self.assertEqual(p["propertyType"], "Single Family|Multi-Family")
+        self.assertNotIn("name", p)
 
     def test_county_falls_back_to_zip(self):
         r = raw("Z1", "Ann Alder", county="")
         r["zipCode"] = "45202"
         self.assertEqual(rc.listing_county(r), "Hamilton")
 
-    def test_request_budget(self):
+    def test_request_budget_keeps_partial_results(self):
+        lat = config.RENTCAST_AREAS["Franklin"]["latitude"]
+        s = FakeSession({(lat, "*:10"): [raw("F1", "Ann Alder")]})
+        budget = Counter()
         with mock.patch.object(config, "RENTCAST_MAX_REQUESTS", 1):
-            with self.assertRaises(rc.RentCastError):
-                rc.fetch_all(FakeSession(), "KEY", Counter())
+            got = rc.fetch_all(s, "KEY", budget)
+        self.assertEqual([r["id"] for r in got], ["F1"])    # the one call that ran is not thrown away
+        self.assertEqual(budget["requests"], 1)
+        self.assertEqual(budget["partial"], 1)
+
+    def test_auth_error_still_raises(self):
+        with self.assertRaises(rc.AuthError):
+            rc.fetch_all(FakeSession(status=401), "KEY", Counter())
 
 
 class Scoring(unittest.TestCase):
@@ -237,17 +257,36 @@ class Scoring(unittest.TestCase):
 
     def test_run_with_key_fetches_accumulates_and_survives_bad_key(self):
         lat = config.RENTCAST_AREAS["Franklin"]["latitude"]
-        s = FakeSession({(lat, "Active"): [raw("L1", "Ann Alder", ltype="Foreclosure")]})
+        s = FakeSession({(lat, "*:10"): [raw("L1", "Ann Alder", ltype="Foreclosure")]})
+        usage = Path(self.tmp.name) / "usage.json"
         with mock.patch.dict(os.environ, {"RENTCAST_API_KEY": "KEY"}):
-            recs, stats = rc.run(self.records(), TODAY, session=s, history_path=self.hist)
+            recs, stats = rc.run(self.records(), TODAY, session=s, history_path=self.hist, usage_path=usage)
             self.assertEqual(stats["new_listings"], 1)
-            self.assertEqual(len(s.calls), 4)                        # one Active call per county
+            self.assertEqual(len(s.calls), 8)                        # fresh + stale, one call per county
+            self.assertEqual(sorted({c[0]["daysOld"] for c in s.calls}), ["*:10", "121:*"])
             self.assertTrue(all(c[0]["status"] == "Active" for c in s.calls))   # never sold/withdrawn
+            self.assertEqual(rc.month_used(TODAY, usage), 8)
             # second run with a rejected key keeps the stored history and still scores
             recs2, stats2 = rc.run(self.records(), "2026-11-13", session=FakeSession(status=401),
-                                   history_path=self.hist)
+                                   history_path=self.hist, usage_path=usage)
             self.assertIn("rejected the API key", stats2["error"])
             self.assertEqual(next(r for r in recs2 if r["id"] == "SAL.1")["distressed_listings"], 1)
+
+    def test_monthly_limit_stops_calls(self):
+        usage = Path(self.tmp.name) / "usage.json"
+        rc.record_usage(TODAY, 44, usage)                            # 44 of 45 already used this month
+        s = FakeSession()
+        with mock.patch.dict(os.environ, {"RENTCAST_API_KEY": "KEY"}):
+            rc.run(self.records(), TODAY, session=s, history_path=self.hist, usage_path=usage)
+        self.assertEqual(len(s.calls), 1)                            # only the one remaining call
+        self.assertEqual(rc.month_used(TODAY, usage), 45)
+        s2 = FakeSession()
+        with mock.patch.dict(os.environ, {"RENTCAST_API_KEY": "KEY"}):
+            _, stats = rc.run(self.records(), TODAY, session=s2, history_path=self.hist, usage_path=usage)
+        self.assertEqual(len(s2.calls), 0)
+        self.assertIn("monthly limit reached", stats["error"])
+        # a new month starts from zero
+        self.assertEqual(rc.month_used("2026-12-01", usage), 0)
 
     def test_history_keeps_first_seen_and_prunes(self):
         h = {}
