@@ -193,13 +193,12 @@ def fetch_county(session, key: str, county: str, status: str, budget: Counter) -
     return out
 
 
-def fetch_all(session, key: str, include_inactive: bool, budget: Counter) -> list[dict]:
-    statuses = ["Active"] + (["Inactive"] if include_inactive else [])
+def fetch_all(session, key: str, budget: Counter) -> list[dict]:
+    """Active listings only; sold and withdrawn listings are not needed."""
     raws: list[dict] = []
-    for status in statuses:
-        for county in config.TARGET_COUNTIES:
-            if county in config.RENTCAST_AREAS:
-                raws.extend(fetch_county(session, key, county, status, budget))
+    for county in config.TARGET_COUNTIES:
+        if county in config.RENTCAST_AREAS:
+            raws.extend(fetch_county(session, key, county, "Active", budget))
     return raws
 
 
@@ -416,7 +415,7 @@ def apply_to_records(records: list[dict], agents: dict[str, dict], stats: Counte
 
 # --- entry point ------------------------------------------------------------
 
-def run(records: list[dict], today: str, force_inactive: bool = False, session=None,
+def run(records: list[dict], today: str, session=None,
         history_path: Path | None = None, lead_path: Path | None = None) -> tuple[list[dict], Counter]:
     stats: Counter = Counter()
     history = load_history(history_path)
@@ -426,11 +425,9 @@ def run(records: list[dict], today: str, force_inactive: bool = False, session=N
         if session is None:
             import requests
             session = requests.Session()
-        weekday = dt.date.fromisoformat(today).weekday()
-        include_inactive = force_inactive or weekday == config.RENTCAST_INACTIVE_WEEKDAY
         budget: Counter = Counter()
         try:
-            raws = fetch_all(session, key, include_inactive, budget)
+            raws = fetch_all(session, key, budget)
             comps = build_comps(raws)
             stats["comp_groups"] = len(comps)
             stats["new_listings"] = update_history(history, raws, today, comps)
@@ -443,7 +440,6 @@ def run(records: list[dict], today: str, force_inactive: bool = False, session=N
         except Exception as e:  # noqa: BLE001 - network/JSON problems must not kill the roster run
             stats["error"] = f"{type(e).__name__}: {e}"
         stats.update({k: v for k, v in budget.items()})
-        stats["included_inactive"] = int(include_inactive)
     else:
         stats["skipped_no_api_key"] = 1
 

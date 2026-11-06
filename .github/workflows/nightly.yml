@@ -2,9 +2,9 @@ name: Agent roster nightly
 
 on:
   schedule:
-    # Mon/Wed/Fri after the Division's 9am ET file refresh (15:30 UTC). The license roster barely
-    # changes, but listings do, and each run costs RentCast API calls.
-    - cron: "30 15 * * 1,3,5"
+    # Weekly, Mondays after the Division's 9am ET file refresh (15:30 UTC). The license roster barely
+    # changes, and each run costs RentCast API calls. Add days (e.g. "1,3,5") for more frequent pulls.
+    - cron: "30 15 * * 1"
   workflow_dispatch:
 
 permissions:

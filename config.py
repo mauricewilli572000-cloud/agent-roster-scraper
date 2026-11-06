@@ -97,10 +97,9 @@ RENTCAST_AREAS = {
     "Hamilton":  {"latitude": 39.20, "longitude": -84.54, "radius": 20},
 }
 RENTCAST_PAGE_SIZE = 500                      # API maximum
-RENTCAST_MAX_PAGES = {"Active": 8, "Inactive": 6}   # per county, per status
+RENTCAST_MAX_PAGES = {"Active": 8}            # per county; only active listings are fetched
 RENTCAST_MAX_REQUESTS = 60                    # hard cap on API calls per run
 RENTCAST_DELAY_SECONDS = 0.15                 # API limit is 20 req/s; stay far below
-RENTCAST_INACTIVE_WEEKDAY = 0                 # Monday: fetch sold/withdrawn listings weekly, not nightly
 
 SCORE_WINDOW_DAYS = 365                       # listings older than this stop counting
 LISTING_RETENTION_DAYS = 550                  # prune stored listings not seen for this long

@@ -77,8 +77,6 @@ def main(argv=None) -> int:
     ap.add_argument("--skip-enrich", action="store_true")
     ap.add_argument("--skip-listings", action="store_true",
                     help="Do not fetch RentCast listings (stored history is still scored)")
-    ap.add_argument("--force-inactive", action="store_true",
-                    help="Also fetch sold/withdrawn listings now (normally Mondays only)")
     args = ap.parse_args(argv)
 
     if args.file:
@@ -118,7 +116,7 @@ def main(argv=None) -> int:
     listing_stats: Counter = Counter()
     if args.skip_listings:
         os.environ.pop("RENTCAST_API_KEY", None)
-    records, listing_stats = rentcast_listings.run(records, today, force_inactive=args.force_inactive)
+    records, listing_stats = rentcast_listings.run(records, today)
     if listing_stats:
         print("Listings stats:", dict(listing_stats))
         if listing_stats.get("skipped_no_api_key") and not listing_stats.get("listings_in_history"):

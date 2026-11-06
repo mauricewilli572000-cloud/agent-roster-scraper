@@ -110,7 +110,7 @@ class Fetch(unittest.TestCase):
     def test_request_budget(self):
         with mock.patch.object(config, "RENTCAST_MAX_REQUESTS", 1):
             with self.assertRaises(rc.RentCastError):
-                rc.fetch_all(FakeSession(), "KEY", True, Counter())
+                rc.fetch_all(FakeSession(), "KEY", Counter())
 
 
 class Scoring(unittest.TestCase):
@@ -241,18 +241,13 @@ class Scoring(unittest.TestCase):
         with mock.patch.dict(os.environ, {"RENTCAST_API_KEY": "KEY"}):
             recs, stats = rc.run(self.records(), TODAY, session=s, history_path=self.hist)
             self.assertEqual(stats["new_listings"], 1)
-            self.assertEqual(stats["included_inactive"], 0)          # Friday: no inactive pull
             self.assertEqual(len(s.calls), 4)                        # one Active call per county
+            self.assertTrue(all(c[0]["status"] == "Active" for c in s.calls))   # never sold/withdrawn
             # second run with a rejected key keeps the stored history and still scores
-            recs2, stats2 = rc.run(self.records(), "2026-11-07", session=FakeSession(status=401),
+            recs2, stats2 = rc.run(self.records(), "2026-11-13", session=FakeSession(status=401),
                                    history_path=self.hist)
             self.assertIn("rejected the API key", stats2["error"])
             self.assertEqual(next(r for r in recs2 if r["id"] == "SAL.1")["distressed_listings"], 1)
-            # Monday pulls inactive too
-            s3 = FakeSession()
-            _, stats3 = rc.run(self.records(), "2026-11-09", session=s3, history_path=self.hist)
-            self.assertEqual(stats3["included_inactive"], 1)
-            self.assertEqual(len(s3.calls), 8)
 
     def test_history_keeps_first_seen_and_prunes(self):
         h = {}
