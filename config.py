@@ -23,7 +23,7 @@ LICENSE_DB_URL = (
 USER_AGENT = "agent-roster-scraper/1.0 (public-records research)"
 REQUEST_DELAY_SECONDS = 2.0     # politeness delay for brokerage crawling
 
-TARGET_COUNTIES = ["Franklin", "Cuyahoga", "Hamilton"]
+TARGET_COUNTIES = ["Franklin", "Cuyahoga", "Summit", "Hamilton"]
 
 # --- License type / status filtering -------------------------------------
 AGENT_TYPES = ("salesperson", "sales person", "broker", "agent")
@@ -65,6 +65,7 @@ COLUMN_ALIASES = {
 ZIP_PREFIX_COUNTY = {
     "432": "Franklin",
     "441": "Cuyahoga",
+    "443": "Summit",
     "452": "Hamilton",
 }
 ZIP_COUNTY = {
@@ -74,6 +75,9 @@ ZIP_COUNTY = {
         "43085", "43109", "43110", "43119", "43123", "43125", "43126", "43137")},
     # Cuyahoga
     **{z: "Cuyahoga" for z in ("44017", "44022", "44040", "44070")},
+    # Summit (443xx Akron ZIPs are covered by the prefix above)
+    **{z: "Summit" for z in ("44056", "44067", "44087", "44203", "44221", "44223", "44224",
+                             "44236", "44237", "44262", "44264", "44278", "44286")},
     # Hamilton
     **{z: "Hamilton" for z in ("45002", "45030", "45033", "45052", "45140", "45174")},
 }
@@ -89,6 +93,7 @@ LEAD_ADDRESSES_FILE = DATA_DIR / "lead_addresses.csv"        # optional: CSV wit
 RENTCAST_AREAS = {
     "Franklin":  {"latitude": 39.97, "longitude": -83.00, "radius": 22},
     "Cuyahoga":  {"latitude": 41.43, "longitude": -81.68, "radius": 22},
+    "Summit":    {"latitude": 41.12, "longitude": -81.52, "radius": 18},
     "Hamilton":  {"latitude": 39.20, "longitude": -84.54, "radius": 20},
 }
 RENTCAST_PAGE_SIZE = 500                      # API maximum

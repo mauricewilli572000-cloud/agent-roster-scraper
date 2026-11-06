@@ -206,7 +206,7 @@ class Scoring(unittest.TestCase):
             recs, stats = rc.run(self.records(), TODAY, session=s, history_path=self.hist)
             self.assertEqual(stats["new_listings"], 1)
             self.assertEqual(stats["included_inactive"], 0)          # Friday: no inactive pull
-            self.assertEqual(len(s.calls), 3)                        # one Active call per county
+            self.assertEqual(len(s.calls), 4)                        # one Active call per county
             # second run with a rejected key keeps the stored history and still scores
             recs2, stats2 = rc.run(self.records(), "2026-11-07", session=FakeSession(status=401),
                                    history_path=self.hist)
@@ -216,7 +216,7 @@ class Scoring(unittest.TestCase):
             s3 = FakeSession()
             _, stats3 = rc.run(self.records(), "2026-11-09", session=s3, history_path=self.hist)
             self.assertEqual(stats3["included_inactive"], 1)
-            self.assertEqual(len(s3.calls), 6)
+            self.assertEqual(len(s3.calls), 8)
 
     def test_history_keeps_first_seen_and_prunes(self):
         h = {}

@@ -60,9 +60,10 @@ class ParseTests(unittest.TestCase):
     def test_filters(self):
         agents, stats, _ = pl.parse_file(self.path)
         ids = {a["id"] for a in agents}
-        self.assertEqual(ids, {"SAL.001", "BRK.003", "SAL.006"})
+        self.assertEqual(ids, {"SAL.001", "BRK.003", "SAL.005", "SAL.006"})
         self.assertEqual(stats["skipped_status"], 1)
         self.assertEqual(stats["skipped_type"], 1)
+        self.assertEqual(stats["skipped_county"], 1)       # Toledo (no county, non-target ZIP)
         self.assertEqual(stats["brokerages_seen"], 1)
         by_id = {a["id"]: a for a in agents}
         self.assertEqual(by_id["BRK.003"]["county"], "Cuyahoga")

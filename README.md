@@ -1,6 +1,6 @@
 # Agent roster + distressed-seller scoring
 
-Franklin, Cuyahoga and Hamilton counties (OH). Separate from the foreclosure repo.
+Franklin, Cuyahoga, Summit and Hamilton counties (OH). Separate from the foreclosure repo.
 
 **Sources**
 - Ohio Division of Real Estate daily license file: who is a licensed, active agent.
@@ -21,7 +21,7 @@ Local run: `RENTCAST_API_KEY=... python run_pipeline.py` (`--inspect` shows the 
 `--skip-listings` skips the API, `--force-inactive` also pulls sold/withdrawn listings now).
 
 ## Notes
-- RentCast is called a few times per night (Active listings, three counties). Sold/withdrawn listings are
+- RentCast is called a few times per night (Active listings, four counties). Sold/withdrawn listings are
   pulled on Mondays. `RENTCAST_MAX_REQUESTS` in `config.py` caps calls per run.
 - Listings accumulate in `data/listings_history.json`; scores get better as history builds. If the repo is
   public, that file and `docs/data` are public too.
