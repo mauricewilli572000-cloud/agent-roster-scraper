@@ -106,8 +106,16 @@ def main(argv=None) -> int:
     agents, stats, mapping = parse_licenses.parse_file(src)
     print("Parse stats:", dict(stats))
     if not agents:
-        print("No agents matched the county/type/status filters; leaving existing data untouched. "
-              "Run with --inspect to check the column mapping.")
+        print("No agents matched the county/type/status filters; leaving existing data untouched.")
+        d = parse_licenses.diagnose(src)
+        print("DIAGNOSTICS (no personal data):")
+        print("  rows:", d["rows"])
+        print("  headers:", d["headers"])
+        print("  mapped:", d["mapping"])
+        for field, vals in d["values"].items():
+            print(f"  top {field} values:", vals)
+        if d["zip_prefix"]:
+            print("  top zip prefixes:", d["zip_prefix"])
         return 3
 
     today = dt.date.today().isoformat()

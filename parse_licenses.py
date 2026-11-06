@@ -140,6 +140,25 @@ def make_id(rec: dict) -> str:
     return "N-" + hashlib.sha1(key.encode()).hexdigest()[:10]
 
 
+def diagnose(path, top: int = 12) -> dict:
+    """Headers, how they were mapped, and the most common VALUES of the filter columns.
+    Deliberately prints no names or contact details, so it is safe in public Actions logs."""
+    mapping, rows = read_table(path)
+    headers = list(next(iter(read_table(path)[1]), {}).keys())
+    counters = {f: Counter() for f in ("license_type", "status", "county") if f in mapping}
+    zip_prefix: Counter = Counter()
+    n = 0
+    for raw in rows:
+        n += 1
+        for f, c in counters.items():
+            c[clean(raw.get(mapping[f])) or "(blank)"] += 1
+        if "zip" in mapping:
+            zip_prefix[zip5(clean(raw.get(mapping["zip"])))[:3] or "(blank)"] += 1
+    return {"rows": n, "headers": headers, "mapping": mapping,
+            "values": {f: c.most_common(top) for f, c in counters.items()},
+            "zip_prefix": zip_prefix.most_common(top) if zip_prefix else None}
+
+
 def parse_file(path):
     """Return (agents, stats, mapping)."""
     mapping, rows = read_table(path)
