@@ -22,7 +22,11 @@ prices, not an appraisal.
 2. Settings > Secrets and variables > Actions > new secret `RENTCAST_API_KEY`.
 3. Optional: put your foreclosure / code-enforcement addresses in `data/lead_addresses.csv`
    (column `address`) to boost agents who list those same properties.
-4. Actions > "Agent roster nightly" > Run workflow (it also runs every Monday after the Division's 9am ET refresh).
+4. **Phase 1, roster only:** Actions > "Agent roster nightly" > Run workflow, with "Also fetch RentCast listings"
+   left unchecked. No RentCast calls are made, so the secret isn't needed yet.
+   **Phase 2, listings:** add the secret, then either tick that box on a manual run or create a repository
+   variable `ENABLE_LISTINGS` = `true` so the weekly schedule includes listings.
+5. Actions > "Agent roster nightly" > Run workflow (it also runs every Monday after the Division's 9am ET refresh).
 
 Local run: `RENTCAST_API_KEY=... python run_pipeline.py` (`--inspect` shows the license-file column mapping,
 `--skip-listings` skips the API).

@@ -6,6 +6,11 @@ on:
     # changes, and each run costs RentCast API calls. Add days (e.g. "1,3,5") for more frequent pulls.
     - cron: "30 15 * * 1"
   workflow_dispatch:
+    inputs:
+      listings:
+        description: "Also fetch RentCast listings (uses ~8 API calls)"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -29,7 +34,9 @@ jobs:
 
       - name: Run pipeline
         env:
-          RENTCAST_API_KEY: ${{ secrets.RENTCAST_API_KEY }}
+          # Phase 1 (roster only): leave the repo variable ENABLE_LISTINGS unset. Phase 2: set it to "true"
+          # (Settings > Secrets and variables > Actions > Variables). Manual runs use the checkbox instead.
+          RENTCAST_API_KEY: ${{ (github.event_name == 'workflow_dispatch' && inputs.listings || github.event_name != 'workflow_dispatch' && vars.ENABLE_LISTINGS == 'true') && secrets.RENTCAST_API_KEY || '' }}
         run: python run_pipeline.py
 
       - name: Commit updated data
