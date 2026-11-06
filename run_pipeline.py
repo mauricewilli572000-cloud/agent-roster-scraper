@@ -110,12 +110,11 @@ def main(argv=None) -> int:
         d = parse_licenses.diagnose(src)
         print("DIAGNOSTICS (no personal data):")
         print("  rows:", d["rows"])
-        print("  headers:", d["headers"])
         print("  mapped:", d["mapping"])
-        for field, vals in d["values"].items():
-            print(f"  top {field} values:", vals)
-        if d["zip_prefix"]:
-            print("  top zip prefixes:", d["zip_prefix"])
+        for h, c in d["columns"].items():
+            print(f"  [{h}] filled={c['filled_pct']}% shapes={c['shapes']}")
+            if c["values"] is not None:
+                print(f"      values={c['values']}")
         return 3
 
     today = dt.date.today().isoformat()

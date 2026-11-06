@@ -140,23 +140,38 @@ def make_id(rec: dict) -> str:
     return "N-" + hashlib.sha1(key.encode()).hexdigest()[:10]
 
 
-def diagnose(path, top: int = 12) -> dict:
-    """Headers, how they were mapped, and the most common VALUES of the filter columns.
-    Deliberately prints no names or contact details, so it is safe in public Actions logs."""
+def _shape(v: str) -> str:
+    """Mask a value so structure is visible but content is not: letters -> a/A, digits -> 9."""
+    out = re.sub(r"[A-Z]", "A", re.sub(r"[a-z]", "a", re.sub(r"\d", "9", v)))
+    return re.sub(r"(.)\1{3,}", lambda m: m.group(1) + "+", out)[:40]
+
+
+def diagnose(path, max_distinct: int = 30) -> dict:
+    """Profile every column without exposing personal data: fill rate, the full value list when a column
+    is a small category set (status, license type...), and masked shapes for everything else."""
     mapping, rows = read_table(path)
-    headers = list(next(iter(read_table(path)[1]), {}).keys())
-    counters = {f: Counter() for f in ("license_type", "status", "county") if f in mapping}
-    zip_prefix: Counter = Counter()
+    cols: dict[str, dict] = {}
     n = 0
     for raw in rows:
         n += 1
-        for f, c in counters.items():
-            c[clean(raw.get(mapping[f])) or "(blank)"] += 1
-        if "zip" in mapping:
-            zip_prefix[zip5(clean(raw.get(mapping["zip"])))[:3] or "(blank)"] += 1
-    return {"rows": n, "headers": headers, "mapping": mapping,
-            "values": {f: c.most_common(top) for f, c in counters.items()},
-            "zip_prefix": zip_prefix.most_common(top) if zip_prefix else None}
+        for h, v in raw.items():
+            c = cols.setdefault(h, {"filled": 0, "values": Counter(), "overflow": False, "shapes": Counter()})
+            v = clean(v)
+            if not v:
+                continue
+            c["filled"] += 1
+            if not c["overflow"]:
+                c["values"][v] += 1
+                if len(c["values"]) > max_distinct:
+                    c["overflow"] = True
+                    c["values"] = Counter()
+            c["shapes"][_shape(v)] += 1
+    report = {}
+    for h, c in cols.items():
+        report[h] = {"filled_pct": round(100 * c["filled"] / max(n, 1), 1),
+                     "values": None if c["overflow"] else c["values"].most_common(15),
+                     "shapes": c["shapes"].most_common(3)}
+    return {"rows": n, "mapping": mapping, "columns": report}
 
 
 def parse_file(path):
