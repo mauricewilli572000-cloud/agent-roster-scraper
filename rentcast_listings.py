@@ -17,8 +17,9 @@ import hashlib
 import json
 import os
 import re
+import statistics
 import time
-from collections import Counter
+from collections import Counter, defaultdict
 from pathlib import Path
 
 import config
@@ -108,6 +109,48 @@ def count_price_cuts(history: dict, current_price) -> int:
     return sum(1 for a, b in zip(prices, prices[1:]) if b < a)
 
 
+def is_distressed(raw: dict) -> bool:
+    hist = raw.get("history") or {}
+    types = {str(raw.get("listingType") or "").lower()}
+    types |= {str(e.get("listingType") or "").lower() for e in hist.values() if isinstance(e, dict)}
+    return bool(types & DISTRESS_TYPES)
+
+
+def _ppsf(raw: dict):
+    price, sqft = raw.get("price"), raw.get("squareFootage")
+    if isinstance(price, (int, float)) and isinstance(sqft, (int, float)) and price > 0 and sqft >= 300:
+        return price / sqft
+    return None
+
+
+def build_comps(raws: list[dict]) -> dict:
+    """Median asking $/sqft by (ZIP, property type) and (county, property type), from this run's
+    Active listings. Distressed listings are left out so they don't drag the benchmark down.
+    RentCast listings carry no market value, so local peers are the benchmark."""
+    by_zip: dict = defaultdict(list)
+    by_county: dict = defaultdict(list)
+    for r in raws:
+        p = _ppsf(r)
+        if p is None or r.get("status") != "Active" or is_distressed(r):
+            continue
+        t = _clean(r.get("propertyType"))
+        by_zip[(_clean(r.get("zipCode")), t)].append(p)
+        by_county[(listing_county(r), t)].append(p)
+    comps = {}
+    for k, v in by_zip.items():
+        if len(v) >= config.COMP_MIN_ZIP:
+            comps[("zip",) + k] = statistics.median(v)
+    for k, v in by_county.items():
+        if len(v) >= config.COMP_MIN_COUNTY:
+            comps[("county",) + k] = statistics.median(v)
+    return comps
+
+
+def benchmark(raw: dict, comps: dict):
+    t = _clean(raw.get("propertyType"))
+    return comps.get(("zip", _clean(raw.get("zipCode")), t)) or comps.get(("county", listing_county(raw), t))
+
+
 # --- API --------------------------------------------------------------------
 
 def _get(session, params: dict, key: str, budget: Counter) -> list:
@@ -162,12 +205,12 @@ def fetch_all(session, key: str, include_inactive: bool, budget: Counter) -> lis
 
 # --- normalise + history ----------------------------------------------------
 
-def normalize(raw: dict) -> dict:
+def normalize(raw: dict, comps: dict | None = None) -> dict:
     agent = raw.get("listingAgent") or {}
     office = raw.get("listingOffice") or {}
     hist = raw.get("history") or {}
-    types = {str(raw.get("listingType") or "").lower()}
-    types |= {str(e.get("listingType") or "").lower() for e in hist.values() if isinstance(e, dict)}
+    ppsf, bench = _ppsf(raw), (benchmark(raw, comps) if comps else None)
+    under = bool(ppsf and bench and ppsf <= config.UNDER_MARKET_RATIO * bench)
     return {
         "id": str(raw.get("id") or raw.get("formattedAddress") or ""),
         "address": _clean(raw.get("formattedAddress")),
@@ -175,7 +218,11 @@ def normalize(raw: dict) -> dict:
         "zip": _clean(raw.get("zipCode")),
         "status": _clean(raw.get("status")),
         "listing_type": _clean(raw.get("listingType")),
-        "distressed": bool(types & DISTRESS_TYPES),
+        "distressed": is_distressed(raw),
+        "under_market": under,
+        "below_market_pct": round(100 * (1 - ppsf / bench)) if under else 0,
+        "stale": (raw.get("daysOnMarket") or 0) > config.STALE_DAYS_ON_MARKET,
+        "property_type": _clean(raw.get("propertyType")),
         "price": raw.get("price"),
         "price_cuts": count_price_cuts(hist, raw.get("price")),
         "days_on_market": raw.get("daysOnMarket") or 0,
@@ -197,11 +244,12 @@ def load_history(path: Path | None = None) -> dict:
         return {}
 
 
-def update_history(history: dict, raws: list[dict], today: str) -> int:
+def update_history(history: dict, raws: list[dict], today: str, comps: dict | None = None) -> int:
+    """Store only listings that match a signal (distressed, well under market, or stale)."""
     new = 0
     for raw in raws:
-        rec = normalize(raw)
-        if not rec["id"]:
+        rec = normalize(raw, comps)
+        if not rec["id"] or not (rec["distressed"] or rec["under_market"] or rec["stale"]):
             continue
         old = history.get(rec["id"])
         if old is None:
@@ -209,9 +257,10 @@ def update_history(history: dict, raws: list[dict], today: str) -> int:
             rec["first_seen"] = today
         else:
             rec["first_seen"] = old.get("first_seen", today)
-            # a later fetch of the same listing may omit history; keep the worse-case flags
-            rec["distressed"] = rec["distressed"] or old.get("distressed", False)
-            rec["price_cuts"] = max(rec["price_cuts"], old.get("price_cuts", 0))
+            # once flagged, stay flagged: a later fetch may omit history or show a changed price
+            for flag in ("distressed", "under_market", "stale"):
+                rec[flag] = rec[flag] or old.get(flag, False)
+            rec["below_market_pct"] = max(rec["below_market_pct"], old.get("below_market_pct", 0))
         rec["last_seen"] = today
         history[rec["id"]] = rec
     cutoff = (dt.date.fromisoformat(today) - dt.timedelta(days=config.LISTING_RETENTION_DAYS)).isoformat()
@@ -231,7 +280,7 @@ def save_history(history: dict, path: Path | None = None):
 def score(a: dict) -> int:
     w = config.SCORE_WEIGHTS
     return (w["distressed"] * a["distressed"] + w["lead_match"] * a["lead_match"]
-            + w["price_cut"] * a["price_cut"] + w["stale"] * a["stale"])
+            + w["under_market"] * a["under_market"] + w["stale"] * a["stale"])
 
 
 def agent_key(l: dict) -> str:
@@ -242,6 +291,7 @@ def agent_key(l: dict) -> str:
 
 def aggregate(history: dict, today: str, lead_addrs: set[str]) -> dict[str, dict]:
     cutoff = (dt.date.fromisoformat(today) - dt.timedelta(days=config.SCORE_WINDOW_DAYS)).isoformat()
+    new_cutoff = (dt.date.fromisoformat(today) - dt.timedelta(days=config.NEW_WINDOW_DAYS)).isoformat()
     agents: dict[str, dict] = {}
     for l in history.values():
         if not l.get("agent_name"):
@@ -251,8 +301,8 @@ def aggregate(history: dict, today: str, lead_addrs: set[str]) -> dict[str, dict
             continue
         a = agents.setdefault(agent_key(l), {
             "names": Counter(), "phones": Counter(), "emails": Counter(), "offices": Counter(),
-            "counties": Counter(), "total": 0, "distressed": 0, "price_cut": 0, "stale": 0,
-            "lead_match": 0, "last_listing": "", "first_seen": today})
+            "counties": Counter(), "total": 0, "distressed": 0, "under_market": 0, "stale": 0,
+            "lead_match": 0, "new": 0, "last_listing": "", "first_seen": today})
         a["names"][l["agent_name"]] += 1
         if l.get("agent_phone"):
             a["phones"][l["agent_phone"]] += 1
@@ -264,8 +314,9 @@ def aggregate(history: dict, today: str, lead_addrs: set[str]) -> dict[str, dict
             a["counties"][l["county"]] += 1
         a["total"] += 1
         a["distressed"] += 1 if l.get("distressed") else 0
-        a["price_cut"] += 1 if l.get("price_cuts", 0) > 0 else 0
-        a["stale"] += 1 if l.get("days_on_market", 0) >= config.STALE_DAYS_ON_MARKET else 0
+        a["under_market"] += 1 if l.get("under_market") else 0
+        a["stale"] += 1 if l.get("stale") else 0
+        a["new"] += 1 if d >= new_cutoff else 0
         a["lead_match"] += 1 if norm_address(l.get("address", "")) in lead_addrs else 0
         a["last_listing"] = max(a["last_listing"], d)
         a["first_seen"] = min(a["first_seen"], l.get("first_seen") or today)
@@ -280,8 +331,8 @@ def _top(counter: Counter) -> str:
 
 # --- apply to records -------------------------------------------------------
 
-STAT_FIELDS = ("distress_score", "listings_12mo", "distressed_listings", "price_cut_listings",
-               "stale_listings", "lead_match_listings", "last_listing")
+STAT_FIELDS = ("distress_score", "flagged_listings", "distressed_listings", "under_market_listings",
+               "stale_listings", "new_listings", "lead_match_listings", "last_listing")
 
 
 def _reset(rec: dict):
@@ -291,10 +342,11 @@ def _reset(rec: dict):
 
 def _add_stats(rec: dict, a: dict):
     rec["distress_score"] += a["score"]
-    rec["listings_12mo"] += a["total"]
+    rec["flagged_listings"] += a["total"]
     rec["distressed_listings"] += a["distressed"]
-    rec["price_cut_listings"] += a["price_cut"]
+    rec["under_market_listings"] += a["under_market"]
     rec["stale_listings"] += a["stale"]
+    rec["new_listings"] += a["new"]
     rec["lead_match_listings"] += a["lead_match"]
     rec["last_listing"] = max(rec["last_listing"], a["last_listing"])
 
@@ -379,7 +431,9 @@ def run(records: list[dict], today: str, force_inactive: bool = False, session=N
         budget: Counter = Counter()
         try:
             raws = fetch_all(session, key, include_inactive, budget)
-            stats["new_listings"] = update_history(history, raws, today)
+            comps = build_comps(raws)
+            stats["comp_groups"] = len(comps)
+            stats["new_listings"] = update_history(history, raws, today, comps)
             save_history(history, history_path)
         except AuthError as e:
             stats["error"] = str(e)

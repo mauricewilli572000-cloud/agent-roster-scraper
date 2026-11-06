@@ -15,8 +15,8 @@ def write_exports(records: list[dict]):
     all_fields = ["id", "name", "license_type", "brokerage", "county", "county_source",
                   "city", "state", "zip", "phone", "phone_source", "email",
                   "expiration", "first_seen", "last_seen", "license_verified", "distress_score",
-                  "listings_12mo", "distressed_listings", "price_cut_listings", "stale_listings",
-                  "lead_match_listings", "last_listing"]
+                  "flagged_listings", "distressed_listings", "under_market_listings", "stale_listings",
+                  "new_listings", "lead_match_listings", "last_listing"]
     with open(config.EXPORT_DIR / "agents_all.csv", "w", newline="", encoding="utf-8-sig") as f:
         w = csv.DictWriter(f, fieldnames=all_fields, extrasaction="ignore")
         w.writeheader()

@@ -7,8 +7,15 @@ Franklin, Cuyahoga, Summit and Hamilton counties (OH). Separate from the foreclo
 - RentCast sale listings: who lists foreclosure / short-sale properties, price cuts, long days on market.
 - Optional brokerage roster pages (`brokerage_sources.json`, see the `.example.json`): phones and emails.
 
-**Score** (last 12 months, weights in `config.py`): 3 per foreclosure/short-sale listing, 2 per listing
-that matches one of your own leads, 1 per listing with a price cut, 1 per listing on market 90+ days.
+**What is tracked** (only these three; weights and thresholds in `config.py`). A listing is stored only if
+it matches at least one, and agents are scored over the last 12 months:
+- foreclosure or short-sale listings: 3 points each
+- priced well under market: asking $/sqft at most 75% of the median for the same ZIP and property type
+  (needs 5+ comparable active listings, falls back to the county median): 2 points
+- on market more than 120 days: 2 points
+- +2 when the listing address is also one of your own leads (`data/lead_addresses.csv`)
+"New" means a flagged listing listed within the last 14 days. "Under market" is measured against other asking
+prices, not an appraisal.
 
 ## Setup
 1. Push this folder to its own GitHub repo; Settings > Pages > deploy from `/docs`.

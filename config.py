@@ -104,12 +104,16 @@ RENTCAST_INACTIVE_WEEKDAY = 0                 # Monday: fetch sold/withdrawn lis
 
 SCORE_WINDOW_DAYS = 365                       # listings older than this stop counting
 LISTING_RETENTION_DAYS = 550                  # prune stored listings not seen for this long
-STALE_DAYS_ON_MARKET = 90
+STALE_DAYS_ON_MARKET = 120               # a listing counts as stale when days on market is MORE than this
+UNDER_MARKET_RATIO = 0.75                 # flagged when asking $/sqft is at most 75% of the local median
+COMP_MIN_ZIP = 5                          # comparable listings needed for a ZIP-level benchmark
+COMP_MIN_COUNTY = 10                      # ...and for the county-level fallback
+NEW_WINDOW_DAYS = 14                      # "new" = flagged listing listed within this many days
 SCORE_WEIGHTS = {
     "distressed": 3,        # listingType Foreclosure / Short Sale
     "lead_match": 2,        # listing address is also one of your own leads
-    "price_cut": 1,         # listing has had at least one price reduction
-    "stale": 1,             # sat on market >= STALE_DAYS_ON_MARKET
+    "under_market": 2,      # asking $/sqft far below comparable local listings
+    "stale": 2,             # on market longer than STALE_DAYS_ON_MARKET
 }
 MIN_LISTING_ONLY_SCORE = 3    # agents not found in the license file are added only at/above this score
 GHL_MIN_SCORE = 3             # minimum score for the distressed-agents GoHighLevel export

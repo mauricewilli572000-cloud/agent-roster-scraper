@@ -60,7 +60,14 @@
   <div class="controls">
     <input type="search" id="q" placeholder="Search name, brokerage, city…" aria-label="Search">
     <select id="type" aria-label="License type"><option value="">All license types</option></select>
-    <label class="chk"><input type="checkbox" id="distressed"> Distressed sellers only</label>
+    <select id="signal" aria-label="Signal">
+      <option value="">All agents</option>
+      <option value="any">Any signal</option>
+      <option value="distressed_listings">Distressed listings</option>
+      <option value="under_market_listings">Under market value</option>
+      <option value="stale_listings">On market 120+ days</option>
+      <option value="new_listings">New in last 14 days</option>
+    </select>
     <label class="chk"><input type="checkbox" id="hasPhone"> Has phone</label>
     <label class="chk"><input type="checkbox" id="hasEmail"> Has email</label>
     <button class="act" id="csv">Download CSV</button>
@@ -81,9 +88,11 @@
 
   <p class="foot">
     Sources: Ohio Division of Real Estate &amp; Professional Licensing daily license database, RentCast sale
-    listings, and public brokerage roster pages where configured. Score = 3 per foreclosure/short-sale listing
-    + 2 per listing that matches one of your own leads + 1 per listing with a price cut + 1 per listing on
-    market 90+ days, over the last 12 months. Agents marked "license not checked" appeared on listings but were
+    listings, and public brokerage roster pages where configured. Only three signals are tracked, over the last 12 months:
+    foreclosure/short-sale listings (3 points each), listings priced at least 25% under the local median
+    price per square foot (2), and listings on market more than 120 days (2); +2 when a listing matches one of
+    your own leads. "Under market" compares against other active listings in the same ZIP and property type,
+    so it reflects asking prices, not appraised value. Agents marked "license not checked" appeared on listings but were
     not matched to the license file. County marked * was inferred from ZIP code and may be off
     for addresses near a county line. Use business lines only, and scrub against the national Do Not Call
     registry before calling or texting.
@@ -95,8 +104,8 @@
   var COUNTIES = ["Franklin", "Cuyahoga", "Summit", "Hamilton"];
   var COLS = [
     ["name", "Name"], ["brokerage", "Brokerage"], ["county", "County"],
-    ["distress_score", "Score"], ["distressed_listings", "Distressed"], ["price_cut_listings", "Price cuts"],
-    ["last_listing", "Last listing"], ["phone", "Phone"], ["email", "Email"], ["first_seen", "Added"]
+    ["distress_score", "Score"], ["distressed_listings", "Distressed"], ["under_market_listings", "Under market"],
+    ["stale_listings", "120+ days"], ["new_listings", "New (14d)"], ["last_listing", "Last listing"], ["phone", "Phone"], ["email", "Email"], ["first_seen", "Added"]
   ];
   var PAGE = 100;
   var state = { rows: [], meta: {}, tab: "All", sortKey: "distress_score", sortDir: -1, page: 0 };
@@ -112,11 +121,12 @@
   function filtered() {
     var q = $("q").value.trim().toLowerCase();
     var type = $("type").value, ph = $("hasPhone").checked, em = $("hasEmail").checked;
-    var dis = $("distressed").checked;
+    var sig = $("signal").value;
     var out = state.rows.filter(function (r) {
       if (state.tab !== "All" && r.county !== state.tab) return false;
       if (type && r.license_type !== type) return false;
-      if (dis && !(r.distressed_listings > 0)) return false;
+      if (sig === "any" && !(r.distress_score > 0)) return false;
+      if (sig && sig !== "any" && !(r[sig] > 0)) return false;
       if (ph && !r.phone) return false;
       if (em && !r.email) return false;
       if (q) {
@@ -184,7 +194,8 @@
     } else if (key === "name" && r.in_latest_file === false) {
       td.textContent = r.name + " ";
       td.appendChild(el("span", { "class": "muted" }, "(not in latest file)"));
-    } else if (key === "distress_score" || key === "distressed_listings" || key === "price_cut_listings") {
+    } else if (key === "distress_score" || key === "distressed_listings" || key === "under_market_listings" ||
+               key === "stale_listings" || key === "new_listings") {
       td.textContent = r[key] ? String(r[key]) : "–";
       if (!r[key]) td.className = "muted";
     } else {
@@ -225,8 +236,8 @@
   function downloadCsv() {
     var rows = filtered();
     var keys = ["name", "brokerage", "license_type", "county", "city", "state", "zip", "phone", "email",
-                "distress_score", "listings_12mo", "distressed_listings", "price_cut_listings",
-                "stale_listings", "last_listing", "first_seen"];
+                "distress_score", "flagged_listings", "distressed_listings", "under_market_listings",
+                "stale_listings", "new_listings", "last_listing", "first_seen"];
     var lines = [keys.join(",")].concat(rows.map(function (r) {
       return keys.map(function (k) { return csvCell(r[k]); }).join(",");
     }));
@@ -247,7 +258,7 @@
     if (m.generated_at) bits.push("updated " + new Date(m.generated_at).toLocaleDateString());
     $("sub").textContent = bits.join(" · ");
 
-    ["q", "type", "distressed", "hasPhone", "hasEmail"].forEach(function (id) {
+    ["q", "type", "signal", "hasPhone", "hasEmail"].forEach(function (id) {
       $(id).addEventListener(id === "q" ? "input" : "change", function () { state.page = 0; render(); });
     });
     $("prev").onclick = function () { state.page--; render(); };

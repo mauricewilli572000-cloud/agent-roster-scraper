@@ -16,11 +16,11 @@ TODAY = "2026-11-06"          # a Friday
 
 
 def raw(id_, agent, county="Franklin", ltype="Standard", office="Buckeye Realty", price=200000,
-        history=None, dom=10, listed="2026-10-01", phone="6145550101", address=None):
+        history=None, dom=10, listed="2026-10-01", phone="6145550101", address=None, sqft=1500, zip_="43215"):
     return {
         "id": id_, "formattedAddress": address or f"{id_} Main St, Columbus, OH 43215",
-        "county": county, "zipCode": "43215", "status": "Active", "listingType": ltype,
-        "price": price, "daysOnMarket": dom, "listedDate": listed + "T00:00:00.000Z",
+        "county": county, "zipCode": zip_, "status": "Active", "listingType": ltype,
+        "propertyType": "Single Family", "squareFootage": sqft, "price": price, "daysOnMarket": dom, "listedDate": listed + "T00:00:00.000Z",
         "history": history or {},
         "listingAgent": {"name": agent, "phone": phone, "email": "Agent@Example.com"},
         "listingOffice": {"name": office, "phone": "6145550000"},
@@ -133,24 +133,60 @@ class Scoring(unittest.TestCase):
     def test_matches_scores_and_fills_phone(self):
         self.seed([
             raw("L1", "Ann M. Alder", ltype="Foreclosure"),
-            raw("L2", "Ann Alder", ltype="Short Sale"),
-            raw("L3", "Ann Alder", dom=120, history={"2026-09-01": {"price": 250000}}, price=200000),
-            raw("L4", "Ann Alder", listed="2024-01-01"),                      # outside 12-month window
+            raw("L2", "Ann Alder", ltype="Short Sale", listed="2026-10-30"),    # listed within 14 days -> new
+            raw("L3", "Ann Alder", dom=130),                                    # stale (> 120 days)
+            raw("L4", "Ann Alder", ltype="Foreclosure", listed="2024-01-01"),   # outside 12-month window
         ])
-        with mock.patch.dict(os.environ, {}, clear=False):
-            os.environ.pop("RENTCAST_API_KEY", None)
-            recs, stats = rc.run(self.records(), TODAY, history_path=self.hist, lead_path=Path("/nonexistent"))
+        os.environ.pop("RENTCAST_API_KEY", None)
+        recs, stats = rc.run(self.records(), TODAY, history_path=self.hist, lead_path=Path("/nonexistent"))
         ann = next(r for r in recs if r["id"] == "SAL.1")
         self.assertEqual(ann["distressed_listings"], 2)
-        self.assertEqual(ann["price_cut_listings"], 1)
         self.assertEqual(ann["stale_listings"], 1)
-        self.assertEqual(ann["listings_12mo"], 3)
-        self.assertEqual(ann["distress_score"], 3 * 2 + 1 + 1)
+        self.assertEqual(ann["under_market_listings"], 0)
+        self.assertEqual(ann["flagged_listings"], 3)
+        self.assertEqual(ann["new_listings"], 1)
+        self.assertEqual(ann["distress_score"], 3 * 2 + 2)
         self.assertEqual(ann["phone"], "(614) 555-0101")
         self.assertEqual(ann["phone_source"], "rentcast-listing")
         bob = next(r for r in recs if r["id"] == "SAL.2")
         self.assertEqual(bob["distress_score"], 0)
         self.assertEqual(stats["skipped_no_api_key"], 1)
+
+    def test_only_flagged_listings_are_stored(self):
+        h = {}
+        n = rc.update_history(h, [
+            raw("PLAIN", "Ann Alder", dom=40),                    # no signal
+            raw("EDGE", "Ann Alder", dom=120),                    # exactly 120 days: not "longer than"
+            raw("STALE", "Ann Alder", dom=121),
+            raw("FC", "Ann Alder", ltype="Foreclosure"),
+        ], TODAY)
+        self.assertEqual(set(h), {"STALE", "FC"})
+        self.assertEqual(n, 2)
+
+    def test_under_market_uses_local_comps(self):
+        comps_src = [raw(f"C{i}", "Comp Agent", price=300000, sqft=1500) for i in range(6)]   # $200/sqft
+        cheap = raw("CHEAP", "Ann Alder", price=210000, sqft=1500)      # $140/sqft = 70% of median
+        fair = raw("FAIR", "Ann Alder", price=270000, sqft=1500)        # $180/sqft = 90%
+        nosqft = raw("NOSQ", "Ann Alder", price=100000, sqft=None)
+        distressed_comp = raw("DC", "Comp Agent", ltype="Foreclosure", price=50000, sqft=1500)
+        comps = rc.build_comps(comps_src + [cheap, fair, nosqft, distressed_comp])
+        self.assertAlmostEqual(comps[("zip", "43215", "Single Family")], 200.0)    # distressed one excluded
+        self.assertTrue(rc.normalize(cheap, comps)["under_market"])
+        self.assertEqual(rc.normalize(cheap, comps)["below_market_pct"], 30)
+        self.assertFalse(rc.normalize(fair, comps)["under_market"])
+        self.assertFalse(rc.normalize(nosqft, comps)["under_market"])
+        self.assertFalse(rc.normalize(cheap)["under_market"])                       # no comps -> never flagged
+
+    def test_too_few_comps_means_no_benchmark(self):
+        comps = rc.build_comps([raw(f"C{i}", "X", price=300000) for i in range(4)])
+        self.assertEqual(comps, {})
+
+    def test_county_fallback_benchmark(self):
+        src = [raw(f"C{i}", "X", price=300000, zip_=f"432{i:02d}") for i in range(12)]   # one per ZIP
+        comps = rc.build_comps(src)
+        self.assertNotIn(("zip", "43200", "Single Family"), comps)
+        cheap = raw("CH", "Ann Alder", price=150000, zip_="43299")
+        self.assertTrue(rc.normalize(cheap, comps)["under_market"])
 
     def test_existing_phone_is_not_overwritten(self):
         self.seed([raw("L1", "Ann Alder", ltype="Foreclosure")])
@@ -192,12 +228,12 @@ class Scoring(unittest.TestCase):
     def test_lead_address_bonus(self):
         lead = Path(self.tmp.name) / "leads.csv"
         lead.write_text("address\n12 Main Street, Columbus OH\n", encoding="utf-8")
-        self.seed([raw("L1", "Ann Alder", address="12 Main St, Columbus, OH 43215")])
+        self.seed([raw("L1", "Ann Alder", ltype="Foreclosure", address="12 Main St, Columbus, OH 43215")])
         os.environ.pop("RENTCAST_API_KEY", None)
         recs, _ = rc.run(self.records(), TODAY, history_path=self.hist, lead_path=lead)
         ann = next(r for r in recs if r["id"] == "SAL.1")
         self.assertEqual(ann["lead_match_listings"], 1)
-        self.assertEqual(ann["distress_score"], 2)
+        self.assertEqual(ann["distress_score"], 3 + 2)
 
     def test_run_with_key_fetches_accumulates_and_survives_bad_key(self):
         lat = config.RENTCAST_AREAS["Franklin"]["latitude"]
