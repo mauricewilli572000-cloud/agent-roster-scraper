@@ -1,0 +1,270 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent Roster</title>
+<style>
+  :root {
+    --bg: #f7f6f3; --panel: #ffffff; --text: #1d1d1b; --muted: #6b6a66;
+    --line: #e3e1db; --accent: #1f5f4a; --accent-text: #ffffff; --chip: #eef3f0;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #141413; --panel: #1c1c1a; --text: #ecebe6; --muted: #a09f98;
+      --line: #2e2d2a; --accent: #5fb596; --accent-text: #10201a; --chip: #22302a;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 1200px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 20px; font-size: 14px; }
+  .tabs { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+  .tab { border: 1px solid var(--line); background: var(--panel); color: var(--text);
+         padding: 7px 14px; border-radius: 999px; cursor: pointer; font: inherit; }
+  .tab[aria-selected="true"] { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+  .tab .n { opacity: .7; margin-left: 6px; font-size: 13px; }
+  .controls { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
+  input[type=search], select { padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px;
+         background: var(--panel); color: var(--text); font: inherit; }
+  input[type=search] { min-width: 240px; flex: 1; max-width: 360px; }
+  label.chk { display: flex; gap: 6px; align-items: center; color: var(--muted); font-size: 14px; }
+  button.act { padding: 8px 14px; border-radius: 8px; border: 1px solid var(--line);
+         background: var(--panel); color: var(--text); cursor: pointer; font: inherit; }
+  .wrap { overflow-x: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
+  table { border-collapse: collapse; width: 100%; min-width: 860px; }
+  th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  th { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted);
+       cursor: pointer; user-select: none; position: sticky; top: 0; background: var(--panel); }
+  tr:last-child td { border-bottom: 0; }
+  td.wrapok { white-space: normal; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .muted { color: var(--muted); }
+  .tag { background: var(--chip); border-radius: 6px; padding: 1px 7px; font-size: 12px; }
+  .pager { display: flex; gap: 10px; align-items: center; justify-content: flex-end; margin-top: 12px; color: var(--muted); font-size: 14px; }
+  .foot { margin-top: 24px; font-size: 13px; color: var(--muted); max-width: 760px; }
+  #msg { padding: 24px; color: var(--muted); }
+  @media (max-width: 600px) { input[type=search] { max-width: none; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>Agent Roster</h1>
+  <p class="sub" id="sub">Loading…</p>
+
+  <div class="tabs" id="tabs" role="tablist"></div>
+
+  <div class="controls">
+    <input type="search" id="q" placeholder="Search name, brokerage, city…" aria-label="Search">
+    <select id="type" aria-label="License type"><option value="">All license types</option></select>
+    <label class="chk"><input type="checkbox" id="distressed"> Distressed sellers only</label>
+    <label class="chk"><input type="checkbox" id="hasPhone"> Has phone</label>
+    <label class="chk"><input type="checkbox" id="hasEmail"> Has email</label>
+    <button class="act" id="csv">Download CSV</button>
+  </div>
+
+  <div class="wrap">
+    <div id="msg">Loading…</div>
+    <table id="tbl" hidden>
+      <thead><tr id="head"></tr></thead>
+      <tbody id="body"></tbody>
+    </table>
+  </div>
+  <div class="pager">
+    <span id="count"></span>
+    <button class="act" id="prev">Prev</button>
+    <button class="act" id="next">Next</button>
+  </div>
+
+  <p class="foot">
+    Sources: Ohio Division of Real Estate &amp; Professional Licensing daily license database, RentCast sale
+    listings, and public brokerage roster pages where configured. Score = 3 per foreclosure/short-sale listing
+    + 2 per listing that matches one of your own leads + 1 per listing with a price cut + 1 per listing on
+    market 90+ days, over the last 12 months. Agents marked "license not checked" appeared on listings but were
+    not matched to the license file. County marked * was inferred from ZIP code and may be off
+    for addresses near a county line. Use business lines only, and scrub against the national Do Not Call
+    registry before calling or texting.
+  </p>
+</main>
+
+<script>
+(function () {
+  var COUNTIES = ["Franklin", "Cuyahoga", "Hamilton"];
+  var COLS = [
+    ["name", "Name"], ["brokerage", "Brokerage"], ["county", "County"],
+    ["distress_score", "Score"], ["distressed_listings", "Distressed"], ["price_cut_listings", "Price cuts"],
+    ["last_listing", "Last listing"], ["phone", "Phone"], ["email", "Email"], ["first_seen", "Added"]
+  ];
+  var PAGE = 100;
+  var state = { rows: [], meta: {}, tab: "All", sortKey: "distress_score", sortDir: -1, page: 0 };
+  var $ = function (id) { return document.getElementById(id); };
+
+  function el(tag, props, text) {
+    var n = document.createElement(tag);
+    if (props) Object.keys(props).forEach(function (k) { n.setAttribute(k, props[k]); });
+    if (text != null) n.textContent = text;
+    return n;
+  }
+
+  function filtered() {
+    var q = $("q").value.trim().toLowerCase();
+    var type = $("type").value, ph = $("hasPhone").checked, em = $("hasEmail").checked;
+    var dis = $("distressed").checked;
+    var out = state.rows.filter(function (r) {
+      if (state.tab !== "All" && r.county !== state.tab) return false;
+      if (type && r.license_type !== type) return false;
+      if (dis && !(r.distressed_listings > 0)) return false;
+      if (ph && !r.phone) return false;
+      if (em && !r.email) return false;
+      if (q) {
+        var hay = (r.name + " " + (r.brokerage || "") + " " + (r.city || "") + " " + (r.email || "")).toLowerCase();
+        if (hay.indexOf(q) === -1) return false;
+      }
+      return true;
+    });
+    var k = state.sortKey, d = state.sortDir;
+    out.sort(function (a, b) {
+      if (typeof a[k] === "number" || typeof b[k] === "number") {
+        var nx = Number(a[k]) || 0, ny = Number(b[k]) || 0;
+        if (nx !== ny) return nx < ny ? -d : d;
+        var tx = (a.name || "").toLowerCase(), ty = (b.name || "").toLowerCase();
+        return tx < ty ? -1 : tx > ty ? 1 : 0;      // ties: alphabetical
+      }
+      var x = (a[k] || "").toString().toLowerCase(), y = (b[k] || "").toString().toLowerCase();
+      if (x === y) return 0;
+      if (!x) return 1;          // blanks last
+      if (!y) return -1;
+      return x < y ? -d : d;
+    });
+    return out;
+  }
+
+  function renderTabs() {
+    var tabs = $("tabs");
+    tabs.textContent = "";
+    ["All"].concat(COUNTIES).forEach(function (t) {
+      var n = state.rows.filter(function (r) { return t === "All" || r.county === t; }).length;
+      var b = el("button", { "class": "tab", role: "tab", "aria-selected": String(state.tab === t) }, t);
+      b.appendChild(el("span", { "class": "n" }, n.toLocaleString()));
+      b.onclick = function () { state.tab = t; state.page = 0; render(); };
+      tabs.appendChild(b);
+    });
+  }
+
+  function renderHead() {
+    var head = $("head");
+    head.textContent = "";
+    COLS.forEach(function (c) {
+      var arrow = state.sortKey === c[0] ? (state.sortDir === 1 ? " ▲" : " ▼") : "";
+      var th = el("th", null, c[1] + arrow);
+      th.onclick = function () {
+        if (state.sortKey === c[0]) state.sortDir *= -1; else { state.sortKey = c[0]; state.sortDir = 1; }
+        render();
+      };
+      head.appendChild(th);
+    });
+  }
+
+  function cell(r, key) {
+    var td = el("td");
+    if (key === "phone" && r.phone) {
+      td.appendChild(el("a", { href: "tel:" + r.phone.replace(/\D/g, "") }, r.phone));
+    } else if (key === "email" && r.email) {
+      td.appendChild(el("a", { href: "mailto:" + r.email }, r.email));
+    } else if (key === "county") {
+      td.textContent = r.county + (r.county_source === "zip-approx" ? "*" : "");
+    } else if (key === "license_type") {
+      td.appendChild(el("span", { "class": "tag" }, (r.license_type || "").replace(/^Real Estate\s+/i, "")));
+    } else if (key === "name" && r.license_verified === false) {
+      td.textContent = r.name + " ";
+      td.appendChild(el("span", { "class": "muted", title: "Found in listings; not matched to the license file" }, "(license not checked)"));
+    } else if (key === "name" && r.in_latest_file === false) {
+      td.textContent = r.name + " ";
+      td.appendChild(el("span", { "class": "muted" }, "(not in latest file)"));
+    } else if (key === "distress_score" || key === "distressed_listings" || key === "price_cut_listings") {
+      td.textContent = r[key] ? String(r[key]) : "–";
+      if (!r[key]) td.className = "muted";
+    } else {
+      td.textContent = r[key] || "";
+      if (!r[key]) td.className = "muted";
+    }
+    return td;
+  }
+
+  function render() {
+    renderTabs();
+    renderHead();
+    var rows = filtered();
+    var pages = Math.max(1, Math.ceil(rows.length / PAGE));
+    if (state.page >= pages) state.page = pages - 1;
+    var slice = rows.slice(state.page * PAGE, state.page * PAGE + PAGE);
+    var body = $("body");
+    body.textContent = "";
+    slice.forEach(function (r) {
+      var tr = el("tr");
+      COLS.forEach(function (c) { tr.appendChild(cell(r, c[0])); });
+      body.appendChild(tr);
+    });
+    $("msg").hidden = rows.length > 0;
+    if (!rows.length) $("msg").textContent = "No agents match these filters.";
+    $("tbl").hidden = rows.length === 0;
+    $("count").textContent = rows.length.toLocaleString() + " agents · page " + (state.page + 1) + " of " + pages;
+    $("prev").disabled = state.page === 0;
+    $("next").disabled = state.page >= pages - 1;
+  }
+
+  function csvCell(v) {
+    v = v == null ? "" : String(v);
+    if (/^[=+\-@]/.test(v)) v = "'" + v;      // neutralise spreadsheet formulas
+    return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+  }
+
+  function downloadCsv() {
+    var rows = filtered();
+    var keys = ["name", "brokerage", "license_type", "county", "city", "state", "zip", "phone", "email",
+                "distress_score", "listings_12mo", "distressed_listings", "price_cut_listings",
+                "stale_listings", "last_listing", "first_seen"];
+    var lines = [keys.join(",")].concat(rows.map(function (r) {
+      return keys.map(function (k) { return csvCell(r[k]); }).join(",");
+    }));
+    var blob = new Blob(["﻿" + lines.join("\n")], { type: "text/csv" });
+    var a = el("a", { href: URL.createObjectURL(blob), download: "agents-" + state.tab.toLowerCase() + ".csv" });
+    document.body.appendChild(a); a.click(); a.remove();
+  }
+
+  function init() {
+    var types = {};
+    state.rows.forEach(function (r) { if (r.license_type) types[r.license_type] = 1; });
+    Object.keys(types).sort().forEach(function (t) { $("type").appendChild(el("option", { value: t }, t)); });
+
+    var m = state.meta, bits = [];
+    if (m.in_latest_file != null) bits.push(m.in_latest_file.toLocaleString() + " active agents");
+    if (m.with_phone != null) bits.push(m.with_phone.toLocaleString() + " with phone");
+    if (m.distressed_agents != null) bits.push(m.distressed_agents.toLocaleString() + " with distressed listings");
+    if (m.generated_at) bits.push("updated " + new Date(m.generated_at).toLocaleDateString());
+    $("sub").textContent = bits.join(" · ");
+
+    ["q", "type", "distressed", "hasPhone", "hasEmail"].forEach(function (id) {
+      $(id).addEventListener(id === "q" ? "input" : "change", function () { state.page = 0; render(); });
+    });
+    $("prev").onclick = function () { state.page--; render(); };
+    $("next").onclick = function () { state.page++; render(); };
+    $("csv").onclick = downloadCsv;
+    render();
+  }
+
+  Promise.all([
+    fetch("data/records.json").then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); }),
+    fetch("data/meta.json").then(function (r) { return r.ok ? r.json() : {}; }).catch(function () { return {}; })
+  ]).then(function (res) { state.rows = res[0]; state.meta = res[1]; init(); })
+    .catch(function () {
+      $("sub").textContent = "";
+      $("msg").textContent = "No data yet. Run the pipeline (python run_pipeline.py) and publish the docs folder.";
+    });
+})();
+</script>
+</body>
+</html>

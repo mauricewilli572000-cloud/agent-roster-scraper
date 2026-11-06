@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+data/raw/
+.env
+brokerage_sources.json.bak

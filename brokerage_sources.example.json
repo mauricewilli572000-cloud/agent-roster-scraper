@@ -1,0 +1,11 @@
+[
+  {
+    "brokerage": "Example Realty Group",
+    "url": "https://www.example-realty.com/agents?page={page}",
+    "pages": [1, 2, 3],
+    "item": ".agent-card",
+    "name": ".agent-name",
+    "phone": "a[href^='tel:']",
+    "email": "a[href^='mailto:']"
+  }
+]
