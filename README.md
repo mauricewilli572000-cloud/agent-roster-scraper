@@ -15,13 +15,13 @@ that matches one of your own leads, 1 per listing with a price cut, 1 per listin
 2. Settings > Secrets and variables > Actions > new secret `RENTCAST_API_KEY`.
 3. Optional: put your foreclosure / code-enforcement addresses in `data/lead_addresses.csv`
    (column `address`) to boost agents who list those same properties.
-4. Actions > "Agent roster nightly" > Run workflow (it also runs daily after the Division's 9am ET refresh).
+4. Actions > "Agent roster nightly" > Run workflow (it also runs Mon/Wed/Fri after the Division's 9am ET refresh).
 
 Local run: `RENTCAST_API_KEY=... python run_pipeline.py` (`--inspect` shows the license-file column mapping,
 `--skip-listings` skips the API, `--force-inactive` also pulls sold/withdrawn listings now).
 
 ## Notes
-- RentCast is called a few times per night (Active listings, four counties). Sold/withdrawn listings are
+- RentCast is called on each run (Mon/Wed/Fri: Active listings, one call per county, more if a county has over 500). Sold/withdrawn listings are
   pulled on Mondays. `RENTCAST_MAX_REQUESTS` in `config.py` caps calls per run.
 - Listings accumulate in `data/listings_history.json`; scores get better as history builds. If the repo is
   public, that file and `docs/data` are public too.
