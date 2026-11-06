@@ -87,15 +87,15 @@
   </div>
 
   <p class="foot">
-    Sources: Ohio Division of Real Estate &amp; Professional Licensing daily license database, RentCast sale
-    listings, and public brokerage roster pages where configured. Only three signals are tracked, over the last 12 months:
+    Agents come from your own imported list and from RentCast listings that match the criteria below; phone
+    and email are the numbers on those sources. The Ohio Division of Real Estate daily license file is used only to
+    check that each agent holds an active license (it has no location or contact data); "name match?" means
+    several licensed agents share the name. Only three signals are tracked, over the last 12 months:
     foreclosure/short-sale listings (3 points each), listings priced at least 25% under the local median
     price per square foot (2), and listings on market more than 120 days (2); +2 when a listing matches one of
     your own leads. "Under market" compares against other active listings in the same ZIP and property type,
-    so it reflects asking prices, not appraised value. Agents marked "license not checked" appeared on listings but were
-    not matched to the license file. County marked * was inferred from ZIP code and may be off
-    for addresses near a county line. Use business lines only, and scrub against the national Do Not Call
-    registry before calling or texting.
+    so it reflects asking prices, not appraised value.  County marked * was guessed from the city and may be wrong for cities that span counties. Numbers may be agents' direct lines: scrub against the national Do Not Call
+    registry before calling, and don't text without consent.
   </p>
 </main>
 
@@ -103,9 +103,9 @@
 (function () {
   var COUNTIES = ["Franklin", "Cuyahoga", "Summit", "Hamilton"];
   var COLS = [
-    ["name", "Name"], ["brokerage", "Brokerage"], ["county", "County"],
+    ["name", "Name"], ["brokerage", "Brokerage"], ["county", "County"], ["city", "City"],
     ["distress_score", "Score"], ["distressed_listings", "Distressed"], ["under_market_listings", "Under market"],
-    ["stale_listings", "120+ days"], ["new_listings", "New (14d)"], ["last_listing", "Last listing"], ["phone", "Phone"], ["email", "Email"], ["first_seen", "Added"]
+    ["stale_listings", "120+ days"], ["new_listings", "New (14d)"], ["last_listing", "Last listing"], ["license_check", "License"], ["phone", "Phone"], ["email", "Email"], ["first_seen", "Added"]
   ];
   var PAGE = 100;
   var state = { rows: [], meta: {}, tab: "All", sortKey: "distress_score", sortDir: -1, page: 0 };
@@ -185,15 +185,18 @@
     } else if (key === "email" && r.email) {
       td.appendChild(el("a", { href: "mailto:" + r.email }, r.email));
     } else if (key === "county") {
-      td.textContent = r.county + (r.county_source === "zip-approx" ? "*" : "");
+      td.textContent = r.county + (/approx/.test(r.county_source || "") ? "*" : "");
     } else if (key === "license_type") {
       td.appendChild(el("span", { "class": "tag" }, (r.license_type || "").replace(/^Real Estate\s+/i, "")));
-    } else if (key === "name" && r.license_verified === false) {
-      td.textContent = r.name + " ";
-      td.appendChild(el("span", { "class": "muted", title: "Found in listings; not matched to the license file" }, "(license not checked)"));
-    } else if (key === "name" && r.in_latest_file === false) {
-      td.textContent = r.name + " ";
-      td.appendChild(el("span", { "class": "muted" }, "(not in latest file)"));
+    } else if (key === "license_check") {
+      var lc = r.license_check;
+      if (lc === "verified") {
+        td.appendChild(el("span", { "class": "tag", title: (r.license_number || "") + (r.license_expires ? " · expires " + r.license_expires : "") }, "Active ✓"));
+      } else if (lc === "ambiguous") {
+        td.appendChild(el("span", { "class": "muted", title: "Several licensed agents share this name" }, "name match?"));
+      } else if (lc === "not found") {
+        td.appendChild(el("span", { "class": "muted", title: "No active salesperson/broker license under this name" }, "none found"));
+      } else { td.textContent = "–"; td.className = "muted"; }
     } else if (key === "distress_score" || key === "distressed_listings" || key === "under_market_listings" ||
                key === "stale_listings" || key === "new_listings") {
       td.textContent = r[key] ? String(r[key]) : "–";
@@ -252,8 +255,9 @@
     Object.keys(types).sort().forEach(function (t) { $("type").appendChild(el("option", { value: t }, t)); });
 
     var m = state.meta, bits = [];
-    if (m.in_latest_file != null) bits.push(m.in_latest_file.toLocaleString() + " active agents");
+    if (m.total != null) bits.push(m.total.toLocaleString() + " agents");
     if (m.with_phone != null) bits.push(m.with_phone.toLocaleString() + " with phone");
+    if (m.license_verified != null) bits.push(m.license_verified.toLocaleString() + " license-verified");
     if (m.distressed_agents != null) bits.push(m.distressed_agents.toLocaleString() + " with distressed listings");
     if (m.generated_at) bits.push("updated " + new Date(m.generated_at).toLocaleDateString());
     $("sub").textContent = bits.join(" · ");

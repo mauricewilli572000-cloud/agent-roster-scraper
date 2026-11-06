@@ -14,7 +14,8 @@ def write_exports(records: list[dict]):
 
     all_fields = ["id", "name", "license_type", "brokerage", "county", "county_source",
                   "city", "state", "zip", "phone", "phone_source", "email",
-                  "expiration", "first_seen", "last_seen", "license_verified", "distress_score",
+                  "expiration", "first_seen", "last_seen", "source", "license_check", "license_number",
+                  "license_expires", "license_brokerage", "distress_score",
                   "flagged_listings", "distressed_listings", "under_market_listings", "stale_listings",
                   "new_listings", "lead_match_listings", "last_listing"]
     with open(config.EXPORT_DIR / "agents_all.csv", "w", newline="", encoding="utf-8-sig") as f:
@@ -35,12 +36,11 @@ def _write_ghl(path, records, distressed_only: bool):
             rows = [r for r in rows if (r.get("distress_score") or 0) >= config.GHL_MIN_SCORE]
             rows.sort(key=lambda r: -(r.get("distress_score") or 0))
         for r in rows:
-            tags = ["real-estate-agent", f'{r["county"].lower()}-county']
+            tags = ["real-estate-agent"] + ([f'{r["county"].lower()}-county'] if r.get("county") else [])
             if (r.get("distress_score") or 0) >= config.GHL_MIN_SCORE:
                 tags.append("distressed-seller")
-            if r.get("license_verified") is False:
-                tags.append("license-unverified")
-            src = "RentCast listings" if r.get("source") == "listing" else "OH Division of Real Estate license file"
+            tags.append("license-verified" if r.get("license_check") == "verified" else "license-unverified")
+            src = {"listing": "RentCast listings", "import": "Imported list"}.get(r.get("source"), "Agent roster")
             w.writerow({
                 "First Name": r["first_name"], "Last Name": r["last_name"],
                 "Phone": r["phone"], "Email": r.get("email", ""),

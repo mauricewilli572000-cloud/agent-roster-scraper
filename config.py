@@ -8,6 +8,7 @@ DOCS_DATA_DIR = ROOT / "docs" / "data"      # served by GitHub Pages
 EXPORT_DIR = ROOT / "exports"
 
 RAW_FILE = RAW_DIR / "license_db.xlsx"
+IMPORT_FILE = DATA_DIR / "imported_agents.csv"      # optional: your own agent list
 RECORDS_FILE = DOCS_DATA_DIR / "records.json"
 META_FILE = DOCS_DATA_DIR / "meta.json"
 BROKERAGE_SOURCES_FILE = ROOT / "brokerage_sources.json"
@@ -39,14 +40,15 @@ EXCLUDE_TYPES = (
 # a fallback after exact matches. Run `python run_pipeline.py --inspect` to see
 # how the real file's headers were mapped, then add aliases here if needed.
 COLUMN_ALIASES = {
-    "license_number": ["=license number", "=license no", "=license", "license number", "license no"],
+    "license_number": ["=license number", "=license no", "=license", "license number", "license no", "=name"],
     "first_name": ["=first name", "=first", "first name"],
     "last_name": ["=last name", "=last", "last name"],
     "claimed": ["organization account name"],
     "full_name": ["=full name", "=licensee name", "=licensee", "=name", "=individual name"],
-    "license_type": ["=license type", "=type", "=license category", "license type", "record type"],
+    "license_type": ["=license type", "=type", "=license category", "license type", "record type",
+                     "regulatory authorization type"],
     "status": ["=status", "=license status", "license status", "status"],
-    "brokerage": ["brokerage", "broker affiliation", "affiliation", "employing broker",
+    "brokerage": ["=primary licensee", "brokerage", "broker affiliation", "affiliation", "employing broker",
                   "=company", "=business name", "=dba"],
     "county": ["=county", "=mailing county", "=business county", "county"],
     "city": ["=city", "=mailing city", "=business city", "city"],
@@ -133,3 +135,20 @@ SCORE_WEIGHTS = {
 }
 MIN_LISTING_ONLY_SCORE = 3    # agents not found in the license file are added only at/above this score
 GHL_MIN_SCORE = 3             # minimum score for the distressed-agents GoHighLevel export
+
+# City -> county for unambiguous principal cities, used only for imported lists that have a city but no
+# county. Marked county_source="city-approx". Add cities as needed; leave out ones that span counties.
+CITY_COUNTY = {
+    **{c: "Franklin" for c in ("columbus", "dublin", "westerville", "grove city", "hilliard", "gahanna",
+                               "reynoldsburg", "upper arlington", "worthington", "bexley", "whitehall",
+                               "canal winchester", "grandview heights", "obetz")},
+    **{c: "Cuyahoga" for c in ("cleveland", "parma", "lakewood", "euclid", "strongsville", "brook park",
+                               "westlake", "solon", "beachwood", "shaker heights", "cleveland heights",
+                               "north olmsted", "garfield heights", "maple heights", "bedford",
+                               "rocky river", "mayfield heights", "berea", "brecksville", "independence",
+                               "fairview park", "bay village", "south euclid", "lyndhurst", "willoughby hills")},
+    **{c: "Summit" for c in ("akron", "cuyahoga falls", "stow", "barberton", "hudson", "tallmadge", "twinsburg",
+                             "fairlawn", "munroe falls", "macedonia", "norton", "green", "copley")},
+    **{c: "Hamilton" for c in ("cincinnati", "norwood", "blue ash", "sharonville", "forest park", "springdale",
+                               "montgomery", "madeira", "deer park", "reading", "wyoming", "harrison", "mount healthy")},
+}

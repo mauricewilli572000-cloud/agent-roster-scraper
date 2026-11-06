@@ -1,8 +1,14 @@
 """Agent roster pipeline.
 
-  python run_pipeline.py                 # download, parse, enrich, export
-  python run_pipeline.py --file lic.xlsx # use a file you downloaded yourself
-  python run_pipeline.py --inspect       # show how the file's columns were mapped
+  python run_pipeline.py                  # build the roster, score listings, verify licenses, export
+  python run_pipeline.py --file lic.xlsx  # use a license file you downloaded yourself
+  python run_pipeline.py --inspect        # show how the license file's columns were mapped
+
+Where agents come from:
+  * data/imported_agents.csv      your own list (optional)
+  * RentCast listings             agents whose listings are distressed / under market / 120+ days
+Where the license file fits: it has no city, county, phone or email, so it only VERIFIES agents
+(active license? which brokerage?). It is never the source of the roster.
 """
 from __future__ import annotations
 
@@ -18,6 +24,8 @@ from pathlib import Path
 import config
 import enrich_brokerages
 import export
+import import_agents
+import license_check
 import parse_licenses
 import rentcast_listings
 
@@ -41,32 +49,30 @@ def download(dest: Path) -> bool:
 def load_records() -> dict:
     try:
         rows = json.loads(config.RECORDS_FILE.read_text(encoding="utf-8"))
-    except FileNotFoundError:
+    except (FileNotFoundError, json.JSONDecodeError):
         return {}
     return {r["id"]: r for r in rows}
 
 
-def merge(existing: dict, fresh: list[dict], today: str) -> list[dict]:
-    """Accumulate across runs: keep first_seen and any enriched contact info."""
-    existing = {k: v for k, v in existing.items() if v.get("source") != "listing"}
-    fresh_ids = set()
-    for rec in fresh:
-        fresh_ids.add(rec["id"])
-        old = existing.get(rec["id"])
-        if old:
-            rec["first_seen"] = old.get("first_seen", today)
-            for k in ("phone", "phone_source", "email", "enriched_at", "notes"):
-                if old.get(k) and not rec.get(k):
-                    rec[k] = old[k]
-        else:
-            rec["first_seen"] = today
-        rec["last_seen"] = today
-        rec["in_latest_file"] = True
-        existing[rec["id"]] = rec
-    for rid, rec in existing.items():
-        if rid not in fresh_ids:
-            rec["in_latest_file"] = False
-    return sorted(existing.values(), key=lambda r: (r["county"], r["last_name"], r["first_name"]))
+def carry_over(records: list[dict], previous: dict, today: str):
+    """Keep first_seen and any phone/email found on an earlier run (e.g. from a brokerage page)."""
+    for r in records:
+        old = previous.get(r["id"], {})
+        r["first_seen"] = old.get("first_seen") or r.get("first_seen") or today
+        r["last_seen"] = today
+        for k in ("phone", "phone_source", "email", "enriched_at", "notes"):
+            if old.get(k) and not r.get(k):
+                r[k] = old[k]
+
+
+def print_profile(d: dict):
+    print("DIAGNOSTICS (no personal data):")
+    print("  rows:", d["rows"])
+    print("  mapped:", d["mapping"])
+    for h, c in d["columns"].items():
+        print(f"  [{h}] filled={c['filled_pct']}% shapes={c['shapes']}")
+        if c["values"] is not None:
+            print(f"      values={c['values']}")
 
 
 def main(argv=None) -> int:
@@ -79,83 +85,81 @@ def main(argv=None) -> int:
                     help="Do not fetch RentCast listings (stored history is still scored)")
     args = ap.parse_args(argv)
 
-    if args.file:
-        src = Path(args.file)
-    else:
-        src = config.RAW_FILE
-        if not args.skip_download and not download(src) and not src.exists():
-            print("No license file available. Download it from the Division's "
-                  "'Notice Regarding License Lookup' page and rerun with --file <path>.")
-            return 2
-    if not src.exists():
-        print(f"File not found: {src}")
-        return 2
+    src = Path(args.file) if args.file else config.RAW_FILE
+    if not args.file and not args.skip_download and not download(src) and not src.exists():
+        print("WARNING: no license file available; licenses will not be verified this run.")
+    have_file = src.exists()
 
-    mapping, rows = parse_licenses.read_table(src)
     if args.inspect:
-        print("Column mapping (our field -> file header):")
-        for k, v in mapping.items():
-            print(f"  {k:15} -> {v}")
-        missing = [k for k in config.COLUMN_ALIASES if k not in mapping]
-        print("Not found in file:", ", ".join(missing) or "none")
-        print("\nFirst 3 data rows:")
-        for row in list(__import__("itertools").islice(rows, 3)):
-            print("  ", {k: v for k, v in row.items() if v not in (None, "")})
+        if not have_file:
+            print(f"File not found: {src}")
+            return 2
+        print_profile(parse_licenses.diagnose(src))
         return 0
 
-    agents, stats, mapping = parse_licenses.parse_file(src)
-    print("Parse stats:", dict(stats))
-    if not agents:
-        print("No agents matched the county/type/status filters; leaving existing data untouched.")
-        d = parse_licenses.diagnose(src)
-        print("DIAGNOSTICS (no personal data):")
-        print("  rows:", d["rows"])
-        print("  mapped:", d["mapping"])
-        for h, c in d["columns"].items():
-            print(f"  [{h}] filled={c['filled_pct']}% shapes={c['shapes']}")
-            if c["values"] is not None:
-                print(f"      values={c['values']}")
-        return 3
-
     today = dt.date.today().isoformat()
-    records = merge(load_records(), agents, today)
 
-    listing_stats: Counter = Counter()
+    # 1. agents: your own list, then the RentCast criteria
+    records = import_agents.load()
+    print(f"Imported agents: {len(records)}")
     if args.skip_listings:
         os.environ.pop("RENTCAST_API_KEY", None)
     records, listing_stats = rentcast_listings.run(records, today)
     if listing_stats:
         print("Listings stats:", dict(listing_stats))
         if listing_stats.get("skipped_no_api_key") and not listing_stats.get("listings_in_history"):
-            print("  (set RENTCAST_API_KEY to fetch distressed-listing data)")
+            print("  (listings not fetched: no API key / switch off)")
+    carry_over(records, load_records(), today)
 
+    # 2. verify against the license file
+    check_stats: Counter = Counter()
+    index_stats: Counter = Counter()
+    if have_file:
+        try:
+            index, index_stats = license_check.build_index(src)
+            print("License index:", dict(index_stats))
+            if not index:
+                print("WARNING: the license file produced no usable agents; showing its profile.")
+                print_profile(parse_licenses.diagnose(src))
+            check_stats = license_check.verify_all(records, index)
+            print("License check:", dict(check_stats))
+        except ValueError as e:
+            print(f"WARNING: could not read the license file ({e}); licenses not verified.")
+
+    # 3. phones/emails from brokerage pages, where configured
     enrich_stats: Counter = Counter()
     if not args.skip_enrich:
         enrich_stats = enrich_brokerages.run(records)
         if enrich_stats:
             print("Enrichment stats:", dict(enrich_stats))
 
+    records.sort(key=lambda r: (-(r.get("distress_score") or 0), r.get("last_name", ""), r.get("first_name", "")))
     config.DOCS_DATA_DIR.mkdir(parents=True, exist_ok=True)
     config.RECORDS_FILE.write_text(json.dumps(records, indent=1), encoding="utf-8")
-    by_county = Counter(r["county"] for r in records if r.get("in_latest_file"))
+    by_county = Counter(r.get("county") or "(no county)" for r in records)
     meta = {
         "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
-        "source_sha256": hashlib.sha256(src.read_bytes()).hexdigest()[:16],
+        "license_file_sha256": hashlib.sha256(src.read_bytes()).hexdigest()[:16] if have_file else "",
         "total": len(records),
-        "in_latest_file": sum(1 for r in records if r.get("in_latest_file")),
         "with_phone": sum(1 for r in records if r.get("phone")),
         "with_email": sum(1 for r in records if r.get("email")),
+        "license_verified": sum(1 for r in records if r.get("license_check") == "verified"),
         "distressed_agents": sum(1 for r in records if r.get("distressed_listings")),
-        "listing_only_agents": sum(1 for r in records if r.get("source") == "listing"),
+        "imported_agents": sum(1 for r in records if r.get("source") == "import"),
+        "listing_agents": sum(1 for r in records if r.get("source") == "listing"),
         "listing_stats": dict(listing_stats),
+        "license_index": dict(index_stats),
+        "license_check": dict(check_stats),
         "by_county": dict(by_county),
-        "parse_stats": dict(stats),
         "enrich_stats": dict(enrich_stats),
-        "column_mapping": mapping,
     }
     config.META_FILE.write_text(json.dumps(meta, indent=1), encoding="utf-8")
     export.write_exports(records)
-    print(f"Done: {meta['total']} agents ({meta['with_phone']} with phone). {dict(by_county)}")
+    if not records:
+        print("No agents yet: add data/imported_agents.csv and/or run with listings enabled "
+              "(RENTCAST_API_KEY).")
+    print(f"Done: {meta['total']} agents ({meta['with_phone']} with phone, "
+          f"{meta['license_verified']} license-verified). {dict(by_county)}")
     return 0
 
 

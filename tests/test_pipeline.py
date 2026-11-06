@@ -71,19 +71,6 @@ class ParseTests(unittest.TestCase):
         self.assertEqual(by_id["SAL.006"]["county_source"], "zip-approx")
         self.assertTrue(by_id["SAL.001"]["claimed"])
 
-    def test_merge_keeps_enriched_contact(self):
-        agents, _, _ = pl.parse_file(self.path)
-        existing = {"SAL.001": {"id": "SAL.001", "first_seen": "2026-10-01", "phone": "(614) 555-0100",
-                                "phone_source": "x.com", "county": "Franklin",
-                                "last_name": "Alder", "first_name": "Ann"},
-                    "OLD.9": {"id": "OLD.9", "county": "Franklin", "last_name": "Zed", "first_name": "Z"}}
-        merged = run_pipeline.merge(existing, agents, "2026-11-05")
-        by_id = {r["id"]: r for r in merged}
-        self.assertEqual(by_id["SAL.001"]["phone"], "(614) 555-0100")
-        self.assertEqual(by_id["SAL.001"]["first_seen"], "2026-10-01")
-        self.assertFalse(by_id["OLD.9"]["in_latest_file"])
-        self.assertTrue(by_id["BRK.003"]["in_latest_file"])
-
 
 class EnrichTests(unittest.TestCase):
     HTML = """
