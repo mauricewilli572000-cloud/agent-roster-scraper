@@ -1,16 +1,24 @@
 {
- "generated_at": "2026-11-06T23:05:47+00:00",
+ "generated_at": "2026-11-07T02:19:21+00:00",
  "license_file_sha256": "88cdd1e7b5dc03c5",
- "total": 0,
- "with_phone": 0,
- "with_email": 0,
- "license_verified": 0,
- "distressed_agents": 0,
+ "total": 155,
+ "with_phone": 150,
+ "with_email": 153,
+ "license_verified": 117,
+ "distressed_agents": 12,
  "imported_agents": 0,
- "listing_agents": 0,
+ "listing_agents": 155,
  "listing_stats": {
-  "skipped_no_api_key": 1,
-  "listings_in_history": 0
+  "month_calls_before": 8,
+  "comp_groups": 81,
+  "new_listings": 754,
+  "requests": 8,
+  "fetched_fresh": 638,
+  "fetched_stale": 719,
+  "listings_in_history": 754,
+  "listing_agents": 498,
+  "agents_listing_only": 155,
+  "agents_below_threshold": 343
  },
  "license_index": {
   "rows": 97492,
@@ -19,7 +27,16 @@
   "skipped_status": 36599,
   "skipped_no_name": 1
  },
- "license_check": {},
- "by_county": {},
+ "license_check": {
+  "verified": 117,
+  "not found": 31,
+  "ambiguous": 7
+ },
+ "by_county": {
+  "Hamilton": 19,
+  "Franklin": 30,
+  "Cuyahoga": 83,
+  "Summit": 23
+ },
  "enrich_stats": {}
 }
