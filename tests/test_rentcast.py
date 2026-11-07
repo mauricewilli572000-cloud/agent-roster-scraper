@@ -137,6 +137,9 @@ class Scoring(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.hist = Path(self.tmp.name) / "h.json"
+        # never touch the repo's real history / usage files from a test
+        mock.patch.object(config, "LISTINGS_HISTORY_FILE", Path(self.tmp.name) / "default_h.json").start()
+        mock.patch.object(config, "RENTCAST_USAGE_FILE", Path(self.tmp.name) / "default_u.json").start()
         mock.patch("time.sleep").start()
         self.addCleanup(mock.patch.stopall)
         self.addCleanup(self.tmp.cleanup)
