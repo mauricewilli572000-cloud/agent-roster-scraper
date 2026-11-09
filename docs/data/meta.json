@@ -1,42 +1,40 @@
 {
- "generated_at": "2026-11-07T02:19:21+00:00",
- "license_file_sha256": "88cdd1e7b5dc03c5",
+ "generated_at": "2026-11-09T23:51:38+00:00",
+ "license_file_sha256": "aac89aac67a7bb8b",
  "total": 155,
  "with_phone": 150,
  "with_email": 153,
- "license_verified": 117,
+ "license_verified": 118,
  "distressed_agents": 12,
  "imported_agents": 0,
  "listing_agents": 155,
  "listing_stats": {
   "month_calls_before": 8,
-  "comp_groups": 81,
-  "new_listings": 754,
-  "requests": 8,
-  "fetched_fresh": 638,
-  "fetched_stale": 719,
+  "error": "ReadTimeout: HTTPSConnectionPool(host='api.rentcast.io', port=443): Read timed out. (read timeout=60)",
+  "requests": 5,
+  "fetched_fresh": 595,
   "listings_in_history": 754,
   "listing_agents": 498,
   "agents_listing_only": 155,
   "agents_below_threshold": 343
  },
  "license_index": {
-  "rows": 97492,
-  "skipped_type": 18446,
-  "indexed": 42446,
-  "skipped_status": 36599,
+  "rows": 97534,
+  "skipped_type": 18451,
+  "indexed": 42459,
+  "skipped_status": 36623,
   "skipped_no_name": 1
  },
  "license_check": {
-  "verified": 117,
-  "not found": 31,
+  "verified": 118,
+  "not found": 30,
   "ambiguous": 7
  },
  "by_county": {
   "Hamilton": 19,
-  "Franklin": 30,
-  "Cuyahoga": 83,
-  "Summit": 23
+  "Franklin": 29,
+  "Cuyahoga": 82,
+  "Summit": 25
  },
  "enrich_stats": {}
 }
